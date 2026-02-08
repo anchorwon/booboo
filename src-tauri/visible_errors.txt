@@ -1,0 +1,199 @@
+﻿
+  check_v12.txt:14: t
+a...oboo\src-taur    
+  check_v12.txt:15:i)
+:String) [], Rem    o
+  check_v12.txt:16:te
+Exception
+  check_v12.txt:17:  
+  + FullyQualifiedEr 
+  check_v12.txt:18:  
+ rorId : NativeComm  
+> check_v12.txt:19:  
+andError
+  check_v12.txt:20: 
+  check_v12.txt:21:wa
+rning: unused imports
+  check_v12.txt:22:: 
+`BitmapDecoder` and `
+  check_v12.txt:23:So
+ftwareBitmap`
+  check_v12.txt:24: -
+-> src\ocr_core.rs:3:
+  check_v12.txt:73:pu
+rpose};
+  check_v12.txt:74:  
+|              ^^^^^^
+  check_v12.txt:75:^^
+^^^  ^^^^^^^^^^^^^^^^
+  check_v12.txt:76:^^
+^^^^^
+  check_v12.txt:77:
+> check_v12.txt:78:er
+ror[E0599]: no method
+  check_v12.txt:79: n
+amed `rgba` found for
+  check_v12.txt:80: s
+truct `screenshots::i
+  check_v12.txt:81:ma
+ge::ImageBuffer<scree
+  check_v12.txt:82:ns
+hots::image::Rgba<u8>
+  check_v12.txt:83:, 
+Vec<u8>>` in the curr
+  check_v12.txt:109: 
+                     
+ 
+  check_v12.txt:110: 
+                     
+ 
+  check_v12.txt:111: 
+                     
++
+  check_v12.txt:112:+
++
+  check_v12.txt:113:
+> check_v12.txt:114:e
+rror: future cannot b
+e
+  check_v12.txt:115: 
+sent between threads 
+s
+  check_v12.txt:116:a
+fely
+  check_v12.txt:117: 
+  --> src\lib.rs:6:1
+  check_v12.txt:118: 
+   |
+  check_v12.txt:119: 
+ 6 | #[tauri::command
+]
+  check_v12.txt:146:4
+1:80
+  check_v12.txt:147: 
+   |
+  check_v12.txt:148: 
+38 |     let writer =
+ 
+  check_v12.txt:149:s
+tream.GetOutputStream
+A
+  check_v12.txt:150:t
+(0).map_err(|e: windo
+w
+> check_v12.txt:151:s
+::core::Error| e.to_s
+t
+  check_v12.txt:152:r
+ing())?;
+  check_v12.txt:153: 
+   |         ------ h
+a
+  check_v12.txt:154:s
+ type `IOutputStream`
+ 
+  check_v12.txt:155:w
+hich is not `Send`
+  check_v12.txt:156:.
+..
+  check_v12.txt:157: 
+41 |     data_writer.
+S
+  check_v12.txt:158:t
+oreAsync().map_err(|e
+:
+> check_v12.txt:159: 
+windows::core::Error|
+ 
+  check_v12.txt:160:e
+.to_string())?.await.
+m
+  check_v12.txt:161:a
+p_err(|e: windows::co
+r
+> check_v12.txt:162:e
+::Error| e.to_string(
+)
+  check_v12.txt:163:)
+?;
+  check_v12.txt:164: 
+   |                 
+ 
+  check_v12.txt:165: 
+                     
+ 
+  check_v12.txt:166: 
+                     
+ 
+  check_v12.txt:167: 
+               ^^^^^ 
+a
+  check_v12.txt:194: 
+   |                 
+ 
+  check_v12.txt:195: 
+                     
+ 
+  check_v12.txt:196: 
+^^^^ required by this
+ 
+  check_v12.txt:197:b
+ound in `ResultFuture
+T
+  check_v12.txt:198:a
+g::future`
+> check_v12.txt:199: 
+   = note: this error
+ 
+  check_v12.txt:200:o
+riginates in the macr
+o
+  check_v12.txt:201: 
+`__cmd__ocr_capture_a
+r
+  check_v12.txt:202:e
+a` which comes from t
+h
+  check_v12.txt:203:e
+ expansion of the mac
+r
+  check_v12.txt:204:o
+ `tauri::generate_han
+d
+  check_v12.txt:205:l
+er` (in Nightly build
+s
+  check_v12.txt:206:,
+ run with -Z macro-ba
+c
+  check_v12.txt:207:k
+trace for more info)
+  check_v12.txt:208:
+  check_v12.txt:209:F
+or more information a
+b
+> check_v12.txt:210:o
+ut this error, try `r
+u
+  check_v12.txt:211:s
+tc --explain E0599`.
+  check_v12.txt:212:w
+arning: `tauri-app` (
+l
+  check_v12.txt:213:i
+b) generated 4 warnin
+g
+  check_v12.txt:214:s
+> check_v12.txt:215:e
+rror: could not compi
+l
+  check_v12.txt:216:e
+ `tauri-app` (lib) du
+e
+> check_v12.txt:217: 
+to 3 previous errors;
+ 
+  check_v12.txt:218:4
+ warnings emitted
+
+

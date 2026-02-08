@@ -1,0 +1,75 @@
+﻿cargo :     Checking tauri-app v0.1.0 (C:\Use
+rs\Administrator\Desktop\Booboo\src-tauri)
+所在位置 行:1 字符: 1
++ cargo check 2>&1 | Out-File -Encoding utf8 
+build_error2.txt
++ ~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified:  
+   (    Checking ta...oboo\src-tauri):Strin  
+  g) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandE 
+   rror
+ 
+warning: unused imports: `Engine as _` and `e
+ngine::general_purpose`
+ --> src\ocr_core.rs:6:14
+  |
+6 | use base64::{Engine as _, engine::general
+_purpose};
+  |              ^^^^^^^^^^^  ^^^^^^^^^^^^^^^
+^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of 
+`#[warn(unused)]`) on by default
+
+warning: unused import: `Deserialize`
+ --> src\translate.rs:3:13
+  |
+3 | use serde::{Deserialize, Serialize};
+  |             ^^^^^^^^^^^
+
+warning: unused import: `Serialize`
+ --> src\paddle_ocr_engine.rs:3:26
+  |
+3 | use serde::{Deserialize, Serialize};
+  |                          ^^^^^^^^^
+
+warning: unused import: `once_cell::sync::Laz
+y`
+ --> src\config.rs:6:5
+  |
+6 | use once_cell::sync::Lazy;
+  |     ^^^^^^^^^^^^^^^^^^^^^
+
+warning: unused import: `AppConfig`
+ --> src\lib.rs:6:14
+  |
+6 | use config::{AppConfig, ConfigState, get_
+config, save_config};
+  |              ^^^^^^^^^
+
+error[E0599]: no method named `path` found fo
+r reference `&AppHandle` in the current scope
+  --> src\config.rs:36:37
+   |
+36 |         let config_dir = app_handle.path
+().app_config_dir().unwrap_or_else(|_| PathBu
+f::from("."));
+   |                                     ^^^^
+ method not found in `&AppHandle`
+   |
+   = help: items from traits can only be used
+ if the trait is in scope
+help: trait `Manager` which provides `path` i
+s implemented but not in scope; perhaps you w
+ant to import it
+   |
+ 1 + use tauri::Manager;
+   |
+
+For more information about this error, try `r
+ustc --explain E0599`.
+warning: `tauri-app` (lib) generated 5 warnin
+gs
+error: could not compile `tauri-app` (lib) du
+e to 1 previous error; 5 warnings emitted

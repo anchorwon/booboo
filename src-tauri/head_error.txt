@@ -1,0 +1,50 @@
+﻿cargo :     Checking ta
+uri-app v0.1.0 (C:\User
+s\Administrator\Desktop
+\Booboo\src-tauri)
+所在位置 行:1 字符: 1
++ cargo check 2> check_
+v12.txt; Get-Content ch
+eck_v12.txt -Tail 100
++ ~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~
+    + CategoryInfo     
+         : NotSpecifi  
+  ed: (    Checking    
+ ta...oboo\src-taur    
+i):String) [], Rem    o
+teException
+    + FullyQualifiedEr 
+   rorId : NativeComm  
+  andError
+ 
+warning: unused imports
+: `BitmapDecoder` and `
+SoftwareBitmap`
+ --> src\ocr_core.rs:3:
+34
+  |
+3 | use windows::Graphi
+cs::Imaging::{BitmapDec
+oder, SoftwareBitmap};
+  |                    
+              ^^^^^^^^^
+^^^^  ^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unuse
+d_imports)]` (part of `
+#[warn(unused)]`) on by
+ default
+
+warning: unused import:
+ `windows::Media::Ocr::
+OcrEngine`
+ --> src\ocr_core.rs:4:
+5
+  |
+4 | use windows::Media:
+:Ocr::OcrEngine;
+  |     ^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^
+
+warning: unused imports

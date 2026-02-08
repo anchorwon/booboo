@@ -1,0 +1,23 @@
+﻿
+check_v12.txt:19:  an
+dError
+check_v12.txt:78:erro
+r[E0599]: no method
+check_v12.txt:114:err
+or: future cannot be
+check_v12.txt:151:s::
+core::Error| e.to_st
+check_v12.txt:159: wi
+ndows::core::Error| 
+check_v12.txt:162:e::
+Error| e.to_string()
+check_v12.txt:199:   
+ = note: this error 
+check_v12.txt:210:out
+ this error, try `ru
+check_v12.txt:215:err
+or: could not compil
+check_v12.txt:217: to
+ 3 previous errors; 
+
+

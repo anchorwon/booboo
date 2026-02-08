@@ -1,0 +1,50 @@
+﻿3 | use base64::{Engine
+ as _, engine::general_
+purpose};
+  |              ^^^^^^
+^^^^^  ^^^^^^^^^^^^^^^^
+^^^^^^^
+
+error[E0599]: no method
+ named `rgba` found for
+ struct `screenshots::i
+mage::ImageBuffer<scree
+nshots::image::Rgba<u8>
+, Vec<u8>>` in the curr
+ent scope
+  --> src\ocr_core.rs:1
+4:87
+   |
+14 |             ImageB
+uffer::<Rgba<u8>, _>::f
+rom_raw(image.width(), 
+image.height(), image.r
+gba().clone())
+   |                   
+                       
+                       
+                      ^
+^^^
+   |
+help: there is a method
+ `as_rgba` with a simil
+ar name
+   |
+14 |             ImageB
+uffer::<Rgba<u8>, _>::f
+rom_raw(image.width(), 
+image.height(), image.a
+s_rgba().clone())
+   |                   
+                       
+                       
+                      +
+++
+
+error: future cannot be
+ sent between threads s
+afely
+   --> src\lib.rs:6:1
+    |
+  6 | #[tauri::command]
+    | ^^^^^^^^^^^^^^^^^
