@@ -247,8 +247,15 @@ pub fn run() {
             let menu = Menu::with_items(app, &[&settings, &quit])?;
 
             // Build tray icon from specific path for better reliability
+            // Force load the icon from bytes to ensure we get the updated one
+            // We use a new filename 'tray_rounded.ico' to bypass Windows cache
+            let icon_bytes = include_bytes!("../icons/tray_rounded.ico");
+            let tray_icon = tauri::image::Image::from_bytes(icon_bytes).unwrap_or_else(|_| {
+                app.default_window_icon().unwrap().clone()
+            });
+
             let _tray = TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
+                .icon(tray_icon)
                 .menu(&menu)
                 .on_menu_event(|app, event| {
                     match event.id.as_ref() {

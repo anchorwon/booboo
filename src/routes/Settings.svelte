@@ -166,7 +166,10 @@
     <!-- Sidebar -->
     <div class="sidebar" data-tauri-drag-region>
       <div class="sidebar-header" data-tauri-drag-region>
-        <div class="logo">BooBoo</div>
+        <div class="logo">
+          <img src="/logo.png" alt="BooBoo" />
+          <span>BooBoo</span>
+        </div>
       </div>
       <nav class="nav-menu">
         {#each tabs as tab}
@@ -356,7 +359,7 @@
         {#if activeTab === 'about'}
           <section class="settings-section" in:fade>
             <div class="about-card">
-              <div class="app-logo">B</div>
+              <img src="/logo.png" alt="BooBoo" class="about-logo" />
               <h3>BooBoo OCR</h3>
               <p>v0.1.0-alpha</p>
               <div class="links">
@@ -448,10 +451,20 @@
   }
 
   .logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
     font-size: 22px;
-    font-weight: 800;
+    font-weight: 600;
     color: #000000; /* Pure black Logo */
     letter-spacing: -0.5px;
+  }
+
+  .logo img {
+    width: 36px; 
+    height: 36px;
+    border-radius: 8px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.1); /* Subtle shadow for depth */
   }
 
   .nav-menu {
@@ -835,6 +848,60 @@
     border-radius: 8px;
     font-size: 13px;
     z-index: 1000;
+  }
+
+  /* About Card */
+  .about-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+    text-align: center;
+    background: #fff;
+    border-radius: 16px;
+    border: none; /* Removed border */
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02); /* Added shadow to match section-card */
+  }
+
+  .about-logo {
+    width: 64px;
+    height: 64px;
+    margin-bottom: 16px;
+    border-radius: 14px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  }
+
+  .about-card h3 {
+    margin: 0 0 8px 0;
+    font-size: 18px;
+    font-weight: 700;
+  }
+
+  .about-card p {
+    margin: 0 0 24px 0;
+    color: #666;
+    font-size: 13px;
+  }
+
+  .links {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+  }
+
+  .links a {
+    color: #0066cc;
+    text-decoration: none;
+  }
+  
+  .links a:hover {
+    text-decoration: underline;
+  }
+
+  .dot {
+    color: #ccc;
   }
 </style>
 
