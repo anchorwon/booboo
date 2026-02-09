@@ -10,12 +10,111 @@ pub async fn translate(text: String, target_lang: &str, config: &crate::config::
 
     match config.translate_engine.as_str() {
         "youdao" => translate_youdao(text, target_lang, config).await,
+        "tencent" => translate_tencent(text, target_lang).await,
         "google" | _ => translate_google(text, target_lang).await,
     }
 }
 
+async fn translate_tencent(text: String, target_lang: &str) -> Result<String, String> {
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+
+    // Hardcoded credentials as requested
+    let secret_id = "AKIDhXAbsxqYFoEW4Xqx6EDctysb9VhhV7Wl";
+    let secret_key = "55tVAev0vd8TbWFvYzEH7IH4e39IFyWr";
+    
+    let service = "tmt";
+    let host = "tmt.tencentcloudapi.com";
+    let region = "ap-guangzhou";
+    let action = "TextTranslate";
+    let version = "2018-03-21";
+    let timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
+
+    let target = if target_lang == "zh-CN" { "zh" } else { "en" };
+    let payload = serde_json::json!({
+        "Source": "auto",
+        "Target": target,
+        "ProjectId": 0,
+        "SourceText": text
+    }).to_string();
+
+    // 1. Canonical Request
+    let http_method = "POST";
+    let canonical_uri = "/";
+    let canonical_querystring = "";
+    let canonical_headers = format!("content-type:application/json\nhost:{}\n", host);
+    let signed_headers = "content-type;host";
+    
+    let mut hasher = Sha256::new();
+    hasher.update(payload.as_bytes());
+    let hashed_payload = hex::encode(hasher.finalize());
+    
+    let canonical_request = format!(
+        "{}\n{}\n{}\n{}\n{}\n{}",
+        http_method, canonical_uri, canonical_querystring, canonical_headers, signed_headers, hashed_payload
+    );
+
+    // 2. String to Sign
+    let algorithm = "TC3-HMAC-SHA256";
+    let credential_scope = format!("{}/{}/tc3_request", date, service);
+    
+    let mut hasher = Sha256::new();
+    hasher.update(canonical_request.as_bytes());
+    let hashed_canonical_request = hex::encode(hasher.finalize());
+    
+    let string_to_sign = format!(
+        "{}\n{}\n{}\n{}",
+        algorithm, timestamp, credential_scope, hashed_canonical_request
+    );
+
+    // 3. Calculate Signature
+    fn sign(key: &[u8], msg: &[u8]) -> Vec<u8> {
+        let mut mac = Hmac::<Sha256>::new_from_slice(key).expect("HMAC can take key of any size");
+        mac.update(msg);
+        mac.finalize().into_bytes().to_vec()
+    }
+
+    let k_date = sign(format!("TC3{}", secret_key).as_bytes(), date.as_bytes());
+    let k_service = sign(&k_date, service.as_bytes());
+    let k_signing = sign(&k_service, b"tc3_request");
+    let signature = hex::encode(sign(&k_signing, string_to_sign.as_bytes()));
+
+    // 4. Authorization Header
+    let authorization = format!(
+        "{} Credential={}/{}, SignedHeaders={}, Signature={}",
+        algorithm, secret_id, credential_scope, signed_headers, signature
+    );
+
+    let client = reqwest::Client::new();
+    let response = client.post(format!("https://{}", host))
+        .header("Authorization", authorization)
+        .header("Content-Type", "application/json")
+        .header("Host", host)
+        .header("X-TC-Action", action)
+        .header("X-TC-Timestamp", timestamp.to_string())
+        .header("X-TC-Version", version)
+        .header("X-TC-Region", region)
+        .body(payload)
+        .send()
+        .await
+        .map_err(|e| format!("Tencent network error: {}", e))?;
+
+    let json: Value = response.json().await.map_err(|e| format!("Tencent parse error: {}", e))?;
+    
+    if let Some(resp) = json.get("Response") {
+        if let Some(err) = resp.get("Error") {
+            return Err(format!("Tencent API error: {} ({})", err["Message"], err["Code"]));
+        }
+        if let Some(target_text) = resp.get("TargetText").and_then(|t| t.as_str()) {
+            return Ok(target_text.to_string());
+        }
+    }
+
+    Err("Invalid response from Tencent Cloud TMT".to_string())
+}
+
 async fn translate_google(text: String, target_lang: &str) -> Result<String, String> {
-    // ... existing translate_google code ...
     let url = format!(
         "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl={}&dt=t&q={}",
         target_lang,
@@ -94,7 +193,6 @@ pub async fn translate_youdao(text: String, target_lang: &str, config: &crate::c
         ("curtime", curtime.as_str()),
     ];
     
-    // Adjust target_lang to Youdao's format if needed (e.g., 'zh-CN' to 'zh-CHS')
     if target_lang == "zh-CN" {
         params[2].1 = "zh-CHS";
     }

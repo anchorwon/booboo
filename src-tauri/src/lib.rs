@@ -3,7 +3,7 @@ mod translate;
 mod paddle_ocr_engine;
 mod config;
 
-use config::{ConfigState, get_config, save_config};
+use config::{ConfigState, get_config, AppConfig};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Modifiers, Shortcut, ShortcutState, Code};
 use std::sync::Mutex;
 use tauri::{Manager, State, Emitter};
@@ -12,6 +12,8 @@ use tauri::tray::TrayIconBuilder;
 
 struct AppState {
     is_pinned: Mutex<bool>,
+    is_dashboard_open: Mutex<bool>,
+    is_capturing: Mutex<bool>,
 }
 
 #[tauri::command]
@@ -42,10 +44,26 @@ async fn ocr_capture_area(window: tauri::Window, config_state: State<'_, ConfigS
         std::panic::catch_unwind(move || {
             // Absolute Screen Physical = Selection Logical * Scale
             // (Since the capture and overlay are both screen-fixed in this new mode)
-            let abs_x = (x as f64 * scale_factor).round() as i32;
-            let abs_y = (y as f64 * scale_factor).round() as i32;
-            let abs_w = (width as f64 * scale_factor).round() as u32;
-            let abs_h = (height as f64 * scale_factor).round() as u32;
+            let abs_x_raw = (x as f64 * scale_factor).round() as i32;
+            let abs_y_raw = (y as f64 * scale_factor).round() as i32;
+            let abs_w_raw = (width as f64 * scale_factor).round() as u32;
+            let abs_h_raw = (height as f64 * scale_factor).round() as u32;
+
+            // Add padding to help OCR context (e.g. 15px visual margin)
+            // But verify we don't go negative on x/y. 
+            // Width/height clamping happens in ocr_core::capture_area automatically.
+            let padding = (15.0 * scale_factor).round() as i32;
+            
+            let abs_x = (abs_x_raw - padding).max(0);
+            let abs_y = (abs_y_raw - padding).max(0);
+            
+            // Adjust width/height to compensate for the shift + extra margin on right/bottom
+            // Total width increase = padding_left + padding_right
+            // Total height increase = padding_top + padding_bottom
+            // Note: If x was 0, padding_left was partly ignored, but we still add full padding_right?
+            // Let's keep it simple: Expand outward.
+            let abs_w = abs_w_raw + (2 * padding as u32);
+            let abs_h = abs_h_raw + (2 * padding as u32);
 
             println!("Trace 2: Final Absolute Screen Physical: x={}, y={}, w={}, h={}", abs_x, abs_y, abs_w, abs_h);
             
@@ -97,10 +115,68 @@ async fn verify_youdao_id_and_key(app_key: String, app_secret: String) -> Result
 }
 
 #[tauri::command]
-async fn resize_dashboard_window(window: tauri::Window, mode: String) -> Result<(), String> {
+fn log_message(msg: String) {
+    println!("FRONTEND LOG: {}", msg);
+}
+
+
+#[tauri::command]
+fn enter_capture_mode(window: tauri::Window, state: State<'_, AppState>) {
+    let start = std::time::Instant::now();
+    println!("DEBUG: Entering capture mode (Backend) at {:?}", start);
+    
+    // 1. Force window state clean
+    let _ = window.set_decorations(false);
+    // set_skip_taskbar is already true in config, skipping to save time
+    let _ = window.set_fullscreen(false);
+    // let _ = window.set_resizable(false); // Skipping for speed
+    
+    let t1 = start.elapsed();
+    
+    // 2. Manual Fullscreen: Match monitor size
+    if let Ok(Some(monitor)) = window.current_monitor() {
+        let size = monitor.size();
+        let position = monitor.position();
+        
+        let _ = window.set_position(*position);
+        let _ = window.set_size(*size);
+    }
+    
+    let t2 = start.elapsed();
+    
+    // 3. Show and Focus
+    let _ = window.show();
+    let _ = window.set_focus();
+    
+    let end = start.elapsed();
+    println!("DEBUG: enter_capture_mode timing: setup={:?}, access_monitor_and_resize={:?}, total={:?}", t1, t2 - t1, end);
+    
+    let mut is_capturing = state.is_capturing.lock().unwrap();
+    *is_capturing = true;
+}
+
+#[tauri::command]
+fn exit_capture_mode(window: tauri::Window, state: State<'_, AppState>) {
+    println!("DEBUG: Exiting capture mode (Backend - Restore)");
+    let mut is_capturing = state.is_capturing.lock().unwrap();
+    *is_capturing = false;
+    
+    // let _ = window.set_always_on_top(false);
+    let _ = window.set_resizable(true);
+    let _ = window.set_fullscreen(false); // Just in case
+    let _ = window.set_decorations(false); 
+    
+    // Frontend will call resize_dashboard_window next, usually
+}
+
+#[tauri::command]
+async fn resize_dashboard_window(window: tauri::Window, state: State<'_, AppState>, mode: String) -> Result<(), String> {
+    let mut is_dashboard_open = state.is_dashboard_open.lock().unwrap();
     if mode == "dashboard" {
+        *is_dashboard_open = true;
         let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize { width: 850.0, height: 650.0 }));
     } else {
+        *is_dashboard_open = false;
         let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize { width: 450.0, height: 550.0 }));
     }
     let _ = window.center();
@@ -120,7 +196,7 @@ pub fn run() {
                         // We do NOT call window.show() here to prevent the window flash in screenshot.
                         // The frontend will call show() AFTER capture_full_screen is done.
                         let _ = window.emit("shortcut-capture", ());
-                        let _ = window.set_focus();
+                        // REMOVED set_focus() to prevent flash of old UI
                     } else {
                         println!("DEBUG: Main window NOT found!");
                     }
@@ -134,11 +210,35 @@ pub fn run() {
             app.manage(config_state);
 
             // Register global shortcut
-            let shortcut = Shortcut::new(Some(Modifiers::ALT | Modifiers::SHIFT), Code::KeyA);
-            if let Err(e) = app.global_shortcut().register(shortcut) {
-                println!("Warning: Failed to register global shortcut: {}", e);
-            } else {
-                println!("Global shortcut registered successfully.");
+            let config = app.state::<ConfigState>().config.lock().unwrap().clone();
+            let shortcut_str = if config.shortcut.is_empty() { "Alt+Shift+A".to_string() } else { config.shortcut.clone() };
+            
+            println!("Registering initial shortcut: {}", shortcut_str);
+            
+            // We need to parse the string to a Shortcut struct, but `tauri_plugin_global_shortcut` 
+            // register method primarily takes `Shortcut`.
+            // However, the high-level API usually allows string registration if we use the `GlobalShortcutExt` trait or manager.
+            // Wait, `app.global_shortcut().register(shortcut)` takes a `Shortcut` struct which we constructed manually before.
+            // Constructing `Shortcut` from string manually is hard. 
+            // Actually, `tauri_plugin_global_shortcut` typically exposes a string parser or we should use the string-based API if available.
+            // Let's check `tauri_plugin_global_shortcut::Shortcut::from_str`.
+            
+            use std::str::FromStr;
+            
+            match Shortcut::from_str(&shortcut_str) {
+                Ok(shortcut) => {
+                    if let Err(e) = app.global_shortcut().register(shortcut) {
+                        println!("Warning: Failed to register global shortcut: {}", e);
+                    } else {
+                        println!("Global shortcut registered successfully.");
+                    }
+                },
+                Err(e) => {
+                    println!("Error parsing shortcut '{}': {}", shortcut_str, e);
+                    // Fallback
+                    let fallback = Shortcut::new(Some(Modifiers::ALT | Modifiers::SHIFT), Code::KeyA);
+                    let _ = app.global_shortcut().register(fallback);
+                }
             }
 
             // Create tray menu
@@ -172,6 +272,8 @@ pub fn run() {
 
             app.manage(AppState {
                 is_pinned: Mutex::new(false),
+                is_dashboard_open: Mutex::new(false),
+                is_capturing: Mutex::new(false),
             });
 
             // Handle window events
@@ -187,12 +289,17 @@ pub fn run() {
                         }
                         tauri::WindowEvent::Focused(false) => {
                             let state = app_handle.state::<AppState>();
-                            let is_pinned = state.is_pinned.lock().unwrap();
-                            if !*is_pinned {
-                                println!("DEBUG: Window lost focus and NOT pinned, hiding...");
+                            let is_pinned = *state.is_pinned.lock().unwrap();
+                            let is_dashboard_open = *state.is_dashboard_open.lock().unwrap();
+                            let is_capturing = *state.is_capturing.lock().unwrap();
+
+                            println!("DEBUG: Window lost focus. Flags: pinned={}, dashboard={}, capturing={}", is_pinned, is_dashboard_open, is_capturing);
+
+                            if !is_pinned && !is_dashboard_open && !is_capturing {
+                                println!("DEBUG: Hiding window...");
                                 let _ = window_clone.hide();
                             } else {
-                                println!("DEBUG: Window lost focus but IS pinned, keeping visible.");
+                                println!("DEBUG: Keeping window visible.");
                             }
                         }
                         _ => {}
@@ -210,8 +317,37 @@ pub fn run() {
             get_config,
             save_config,
             verify_youdao_id_and_key,
-            resize_dashboard_window
+            resize_dashboard_window,
+            log_message,
+            enter_capture_mode,
+            exit_capture_mode,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[tauri::command]
+fn save_config(app: tauri::AppHandle, state: State<ConfigState>, new_config: AppConfig) -> Result<(), String> {
+    let mut config = state.config.lock().map_err(|e| e.to_string())?;
+    
+    // Check if shortcut changed
+    if config.shortcut != new_config.shortcut {
+        println!("Shortcut changed from '{}' to '{}'. Updating...", config.shortcut, new_config.shortcut);
+        
+        // Unregister all (easiest way to clean up old one without parsing it again)
+        let _ = app.global_shortcut().unregister_all();
+        
+        // Register new
+        use std::str::FromStr;
+        if let Ok(shortcut) = Shortcut::from_str(&new_config.shortcut) {
+             if let Err(e) = app.global_shortcut().register(shortcut) {
+                 println!("Failed to register new shortcut: {}", e);
+                 // Don't fail the save, just warn
+             }
+        }
+    }
+    
+    *config = new_config;
+    drop(config); // unlock before saving to file
+    state.save()
 }

@@ -11,6 +11,7 @@ pub struct AppConfig {
     pub youdao_app_key: String,
     pub youdao_app_secret: String,
     pub coze_api_key: String,     // Future proofing
+    pub shortcut: String,
 }
 
 impl Default for AppConfig {
@@ -21,6 +22,7 @@ impl Default for AppConfig {
             youdao_app_key: "".to_string(),
             youdao_app_secret: "".to_string(),
             coze_api_key: "".to_string(),
+            shortcut: "Alt+Shift+A".to_string(),
         }
     }
 }
@@ -58,17 +60,8 @@ impl ConfigState {
     }
 }
 
-// Commands
 #[tauri::command]
 pub fn get_config(state: State<ConfigState>) -> Result<AppConfig, String> {
     let config = state.config.lock().map_err(|e| e.to_string())?;
     Ok(config.clone())
-}
-
-#[tauri::command]
-pub fn save_config(state: State<ConfigState>, new_config: AppConfig) -> Result<(), String> {
-    let mut config = state.config.lock().map_err(|e| e.to_string())?;
-    *config = new_config;
-    drop(config); // unlock before saving to file
-    state.save()
 }

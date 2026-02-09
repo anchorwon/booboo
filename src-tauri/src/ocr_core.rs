@@ -116,10 +116,12 @@ pub async fn run_ocr(image: DynamicImage, config: &crate::config::AppConfig) -> 
 async fn run_windows_ocr_logic(image: DynamicImage) -> Result<String, String> {
     println!("ocr_core: Running Windows OCR logic...");
 
-    // Accuracy optimization:
-    // 1. Scale up by 2x (Triangle is safer/cleaner than Lanczos for text)
-    let (w, h) = (image.width() * 2, image.height() * 2);
-    let upscaled = image.resize(w, h, image::imageops::FilterType::Triangle);
+    // 1. Scale up by 2.5x using Lanczos3
+    // Triangle at 3x was too blurry for dense text.
+    // Lanczos3 provides the best trade-off between sharpness (for glitch font) and artifact control (for punctuation).
+    let new_w = (image.width() as f64 * 2.5) as u32;
+    let new_h = (image.height() as f64 * 2.5) as u32;
+    let upscaled = image.resize(new_w, new_h, image::imageops::FilterType::Lanczos3);
     
     // 2. Convert to grayscale
     let luma = upscaled.to_luma8();
@@ -131,8 +133,9 @@ async fn run_windows_ocr_logic(image: DynamicImage) -> Result<String, String> {
     }
     
     // 4. Run OCR on BOTH strategies PARALLEL
-    // Save debug images usually, but skipping for perf unless needed
+    // Save debug images for troubleshooting (Commented out for production)
     // let _ = luma.save("C:/Users/Administrator/Desktop/ocr_debug_normal.png");
+    // let _ = luma_inverted.save("C:/Users/Administrator/Desktop/ocr_debug_inverted.png");
 
     let mut png_normal = Vec::new();
     DynamicImage::ImageLuma8(luma).write_to(&mut std::io::Cursor::new(&mut png_normal), image::ImageFormat::Png).map_err(|e| e.to_string())?;

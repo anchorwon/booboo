@@ -33,6 +33,8 @@ windows = { version = "0.56.0", features = ["Media_Ocr", "Graphics_Imaging", "St
 once_cell = "1.19.0"
 sha2 = "0.10.9"
 hex = "0.4.3"
+hmac = "0.12.1"
+chrono = "0.4.43"
 
 # Enable high optimizations for dependencies in dev mode
 # This is crucial for performance of heavy crates like 'image' and 'base64'

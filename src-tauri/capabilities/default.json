@@ -16,6 +16,7 @@
     "core:window:allow-set-fullscreen",
     "core:window:allow-scale-factor",
     "core:window:allow-outer-position",
+    "core:window:allow-set-decorations",
     "opener:default",
     "global-shortcut:allow-is-registered",
     "global-shortcut:allow-register",

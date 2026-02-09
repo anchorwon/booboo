@@ -69,8 +69,13 @@
   onmouseup={handleMouseUp}
   oncontextmenu={handleContextMenu}
 >
-  {#if backgroundImage}
-    <img src={backgroundImage} alt="" class="bg-img" />
+  {#if backgroundImage && backgroundImage.length > 10}
+    <!-- svelte-ignore a11y_missing_attribute -->
+    <img 
+      src={backgroundImage} 
+      class="bg-img" 
+      onerror={(e) => e.currentTarget.style.display = 'none'}
+    />
   {/if}
   
   <div class="dimmer"></div>
@@ -103,12 +108,13 @@
     <div class="corner br"></div>
   </div>
   
-  <div class="hint-container">
+  <!-- Hint container removed as per user feedback -->
+  <!-- <div class="hint-container">
     <div class="hint">
       <span>拖拽选择区域，ESC 或 右键 取消</span>
       <button class="exit-btn" onclick={(e) => { e.stopPropagation(); onCancel?.(); }}>退出</button>
     </div>
-  </div>
+  </div> -->
 </div>
 
 <style>

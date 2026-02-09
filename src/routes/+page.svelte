@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { listen } from "@tauri-apps/api/event";
   import { invoke, convertFileSrc } from "@tauri-apps/api/core";
   import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -25,9 +25,20 @@
     { code: "en", name: "英文" }
   ];
 
+  let currentTranslateEngine = $state("google");
+
+  async function updateConfig() {
+    try {
+      const config = await invoke<{ translate_engine: string }>("get_config");
+      currentTranslateEngine = config.translate_engine;
+    } catch (e) {
+      console.error("Failed to load config:", e);
+    }
+  }
+
   onMount(() => {
     const unlistenPromise = listen("shortcut-capture", () => {
-      console.log("Frontend received shortcut-capture event!");
+      console.log("Frontend received shortcut-capture event! Calling startCapture...");
       startCapture();
     });
 
@@ -38,6 +49,23 @@
       invoke("resize_dashboard_window", { mode: "dashboard" });
     });
 
+    // Ensure we start frameless (recursive check to fight system overrides)
+    const enforceFrameless = async () => {
+       console.log("Forcing frameless window...");
+       await appWindow.setDecorations(false);
+       // Re-check after a short delay
+       setTimeout(async () => {
+          if (await appWindow.isDecorated()) {
+             console.log("Still decorated, retrying...");
+             await appWindow.setDecorations(false);
+          }
+       }, 200);
+    };
+    
+    // Initial call
+    updateConfig();
+    setTimeout(enforceFrameless, 50);
+
     return () => {
       unlistenPromise.then(unlisten => unlisten());
       settingsUnlistenPromise.then(unlisten => unlisten());
@@ -45,47 +73,95 @@
   });
 
   async function toggleSettings(show: boolean) {
+    if (show && isCapturing) {
+      await handleCancel();
+    }
     showSettings = show;
+    
+    // Refresh config when closing settings to ensure changes take effect
+    if (!show) {
+      await updateConfig();
+    }
+    
     await invoke("resize_dashboard_window", { mode: show ? "dashboard" : "normal" });
   }
 
   let captureBg = $state<string | null>(null);
 
   async function startCapture() {
-    console.log("startCapture called, isProcessing:", isProcessing);
-    if (isProcessing) return;
+    console.log("startCapture called. isProcessing:", isProcessing, "showSettings:", showSettings);
+    if (isProcessing) {
+        console.log("Skipping capture because isProcessing is true");
+        return;
+    }
+    
+    // Ensure settings are closed when starting capture to avoid UI overlap
+    if (showSettings) {
+       showSettings = false;
+       // We don't wait for resize here because we are about to hide/fullscreen anyway
+       // But we should ensure the state is consistent for when we return
+       // Invoke resize to normal in case we cancel capture and return to a window
+       invoke("resize_dashboard_window", { mode: "normal" });
+    }
+
     try {
       // Step 0: Ensure window is hidden before capture to prevent flash
       // Since backend no longer calls show(), this is usually already hidden 
       // unless the user had the result window open.
+      // Step 0: Ensure window is hidden before capture to prevent flash
+      // Since backend no longer calls show(), this is usually already hidden 
+      // unless the user had the result window open.
       await appWindow.hide();
+      // Wait a bit for the window to actually disappear from the screen compositor
+      // Reduced from 300ms to 50ms for better responsiveness
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
       
       isCapturing = true; 
+      captureBg = null; // Reset background to prevent showing old or broken image
       document.body.style.backgroundColor = "transparent";
       ocrResult = null;
       translatedText = null;
       
+      console.time("CaptureTotal");
       console.log("Starting capture process...");
+      invoke("log_message", { msg: "FRONTEND: Starting capture process..." });
       
-      // Step 1: Request full screen capture from backend
+      await updateConfig(); 
+      
       statusMessage = "正在截取屏幕...";
-      const filePath = await invoke<string>("capture_full_screen");
-      console.log("Capture file path:", filePath);
       
-      // Step 2: Convert to asset URL for display
+      console.time("CaptureScreenshot");
+      const filePath = await invoke<string>("capture_full_screen");
+      console.timeEnd("CaptureScreenshot");
+      
+      console.log("Capture file path:", filePath);
+      invoke("log_message", { msg: `FRONTEND: Capture file path: ${filePath}` });
+      
       captureBg = convertFileSrc(filePath);
       
-      // Step 3: SUCCESS! Now show the window as a fullscreen overlay
-      await appWindow.setFullscreen(true);
-      await appWindow.show();
-      await appWindow.setFocus();
+      // Step 3: Wait for Svelte to render the image to the DOM
+      await tick();
+      // Small pause to allow browser paint cycle
+      await new Promise(r => setTimeout(r, 50)); 
+      
+      invoke("log_message", { msg: "FRONTEND: Entering capture mode via Backend..." });
+      
+      // Delegate window sizing/showing to backend for robustness
+      console.time("EnterCaptureMode");
+      await invoke("enter_capture_mode");
+      console.timeEnd("EnterCaptureMode");
+      
+      invoke("log_message", { msg: "FRONTEND: Window should be visible now." });
+      console.timeEnd("CaptureTotal");
       
       statusMessage = "请选择区域";
     } catch (e) {
       console.error("Failed to start capture:", e);
-      statusMessage = "截图失败";
+      invoke("log_message", { msg: `FRONTEND ERROR: Failed to start capture: ${e}` });
+      statusMessage = "截图失败: " + e;
       isCapturing = false;
-      await appWindow.show();
+      await invoke("exit_capture_mode");
     }
   }
 
@@ -93,7 +169,14 @@
     const { x, y, width, height } = rect;
     isCapturing = false;
     document.body.style.backgroundColor = "";
-    await appWindow.setFullscreen(false);
+    
+    // Exit manual fullscreen via backend
+    await invoke("exit_capture_mode");
+    // Force center and correct size after capture
+    await invoke("resize_dashboard_window", { mode: "normal" });
+    
+    // Safety check: ensure decorations are still OFF
+    console.log("Exited capture mode.");
 
     isProcessing = true;
     hasAttempted = true;
@@ -147,22 +230,21 @@
   async function handleCancel() {
     isCapturing = false;
     document.body.style.backgroundColor = "";
-    await appWindow.setFullscreen(false);
+    
+    await invoke("exit_capture_mode");
+    
+    // Crucial: Hide the window immediately on cancel, otherwise it stays visible (borderless/fullscreen turned off but still visible)
+    console.log("Cancelled capture, hiding window...");
+    await appWindow.hide();
+    
+    console.log("Cancelled capture.");
+    
     captureBg = null;
   }
 
   function copyText(text: string | null) {
     if (!text) return;
     navigator.clipboard.writeText(text);
-  }
-
-  function dragWindow(e: MouseEvent) {
-    const target = e.target as HTMLElement;
-    // Don't drag if clicking on a button or its children
-    if (target.closest('.tool-btn') || target.closest('button')) {
-      return;
-    }
-    appWindow.startDragging();
   }
 
   async function hideWindow() {
@@ -208,9 +290,10 @@
   <Settings onClose={() => toggleSettings(false)} />
 {/if}
 
-<main class="bob-container" style:display={isCapturing ? 'none' : 'block'}>
+<div style:display={isCapturing || showSettings ? 'none' : 'block'}>
+<main class="bob-container">
   <!-- Top Toolbar -->
-  <header class="toolbar" onmousedown={dragWindow}>
+  <header class="toolbar">
     <div class="left-actions">
       <button class="tool-btn pin-btn" class:active={isPinned} onclick={togglePin} title={isPinned ? "取消固定" : "固定"}>
         <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22L12,22.8L12.8,22V16H18V14L16,12Z"/></svg>
@@ -262,6 +345,12 @@
           <div class="target-lang-pill">
             <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M12.87,15.07L10.33,12.56L10.36,12.53C12.1,10.59 13.34,8.36 14.07,6H17V4H10V2H8V4H1V6H12.17C11.5,7.92 10.44,9.75 9,11.35C8.07,10.32 7.3,9.19 6.69,8H4.69C5.42,9.63 6.42,11.17 7.67,12.56L2.58,17.58L4,19L9,14L12.11,17.11L12.87,15.07M18.5,10H16.5L12,22H14L15.12,19H19.87L21,22H23L18.5,10M15.88,17L17.5,12.67L19.12,17H15.88Z"/></svg>
             {targetLang === "zh-CN" ? "中文简体" : "英文"}
+            <span class="provider-badge">
+              by {
+                currentTranslateEngine === 'youdao' ? '有道' : 
+                currentTranslateEngine === 'tencent' ? '腾讯翻译君' : 'Google'
+              }
+            </span>
           </div>
           </div>
         <div class="result-body">
@@ -284,6 +373,7 @@
     </div>
   </div>
 </main>
+</div>
 
 <style>
   :root {
@@ -343,7 +433,6 @@
     padding: 0 12px;
     background: var(--bob-bg);
     border-bottom: 1px solid var(--bob-border);
-    cursor: move;
   }
 
   .left-actions, .right-actions {
@@ -589,5 +678,21 @@
 
   .fab-btn:active {
     transform: scale(0.95);
+  }
+
+  .provider-badge {
+    font-size: 10px;
+    background: rgba(0, 0, 0, 0.05);
+    padding: 1px 4px;
+    border-radius: 4px;
+    color: var(--bob-text-dim);
+    margin-left: 4px;
+    font-weight: 400;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .provider-badge {
+      background: rgba(255, 255, 255, 0.1);
+    }
   }
 </style>
