@@ -1,4 +1,5 @@
 use std::process::{Command, Stdio, Child};
+use std::os::windows::process::CommandExt;
 use std::io::{Write, BufReader, BufRead};
 use serde::Deserialize;
 use std::sync::Mutex;
@@ -38,6 +39,7 @@ fn get_or_spawn_process() -> Result<std::process::Child, String> {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW
         .spawn()
         .map_err(|e| format!("Failed to spawn PaddleOCR: {}", e))?;
         

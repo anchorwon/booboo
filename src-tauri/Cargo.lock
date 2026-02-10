@@ -400,6 +400,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "booboo"
+version = "0.1.0"
+dependencies = [
+ "arboard",
+ "base64 0.22.1",
+ "chrono",
+ "hex",
+ "hmac",
+ "image 0.25.9",
+ "once_cell",
+ "reqwest 0.12.28",
+ "screenshots",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-global-shortcut",
+ "tauri-plugin-opener",
+ "urlencoding",
+ "windows 0.56.0",
+]
+
+[[package]]
 name = "brotli"
 version = "8.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4710,30 +4734,6 @@ dependencies = [
  "webview2-com",
  "window-vibrancy",
  "windows 0.61.3",
-]
-
-[[package]]
-name = "tauri-app"
-version = "0.1.0"
-dependencies = [
- "arboard",
- "base64 0.22.1",
- "chrono",
- "hex",
- "hmac",
- "image 0.25.9",
- "once_cell",
- "reqwest 0.12.28",
- "screenshots",
- "serde",
- "serde_json",
- "sha2",
- "tauri",
- "tauri-build",
- "tauri-plugin-global-shortcut",
- "tauri-plugin-opener",
- "urlencoding",
- "windows 0.56.0",
 ]
 
 [[package]]
