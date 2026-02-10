@@ -19,6 +19,7 @@
   const appWindow = getCurrentWindow();
 
   let isPinned = $state(false);
+  let captureMode = $state<'ocr' | 'pin'>('ocr');
 
   const languages = [
     { code: "zh-CN", name: "中文简体" },
@@ -36,10 +37,19 @@
     }
   }
 
+  $effect(() => {
+    invoke("set_processing_state", { processing: isProcessing });
+  });
+
   onMount(() => {
     const unlistenPromise = listen("shortcut-capture", () => {
       console.log("Frontend received shortcut-capture event! Calling startCapture...");
-      startCapture();
+      startCapture('ocr');
+    });
+
+    const unlistenPinPromise = listen("shortcut-pin", () => {
+      console.log("Frontend received shortcut-pin event! Calling startCapture(pin)...");
+      startCapture('pin');
     });
 
     const settingsUnlistenPromise = listen("open-settings", () => {
@@ -67,7 +77,11 @@
     setTimeout(enforceFrameless, 50);
 
     return () => {
+    return () => {
       unlistenPromise.then(unlisten => unlisten());
+      unlistenPinPromise.then(unlisten => unlisten());
+      settingsUnlistenPromise.then(unlisten => unlisten());
+    };
       settingsUnlistenPromise.then(unlisten => unlisten());
     };
   });
@@ -76,19 +90,28 @@
     if (show && isCapturing) {
       await handleCancel();
     }
+    
+    // Delegate hiding and resizing to Rust for atomic-like behavior
+    await invoke("resize_dashboard_window", { mode: show ? "dashboard" : "normal" });
+
+    if (!show) {
+       // Safety buffer: Wait for OS to confirm hide before swapping Svelte UI state back to results
+       await new Promise(r => setTimeout(r, 250));
+    }
+
     showSettings = show;
     
-    // Refresh config when closing settings to ensure changes take effect
+    // Refresh config after closing settings
     if (!show) {
       await updateConfig();
     }
-    
-    await invoke("resize_dashboard_window", { mode: show ? "dashboard" : "normal" });
   }
 
   let captureBg = $state<string | null>(null);
 
-  async function startCapture() {
+  async function startCapture(mode: 'ocr' | 'pin' = 'ocr') {
+    console.log("startCapture called with mode:", mode);
+    captureMode = mode;
     console.log("startCapture called. isProcessing:", isProcessing, "showSettings:", showSettings);
     if (isProcessing) {
         console.log("Skipping capture because isProcessing is true");
@@ -167,6 +190,29 @@
 
   async function handleAreaSelect(rect) {
     const { x, y, width, height } = rect;
+    
+    if (captureMode === 'pin') {
+        isCapturing = false;
+        document.body.style.backgroundColor = "";
+        await invoke("exit_capture_mode");
+        
+        try {
+             await invoke("pin_selection", { 
+                x: Math.round(x), 
+                y: Math.round(y), 
+                width: Math.round(width), 
+                height: Math.round(height) 
+            });
+        } catch (e) {
+             console.error("Pin failed:", e);
+             alert("贴图失败: " + e);
+        }
+        return;
+    }
+
+    isProcessing = true;
+    invoke("set_processing_state", { processing: true });
+    
     isCapturing = false;
     document.body.style.backgroundColor = "";
     
@@ -178,7 +224,6 @@
     // Safety check: ensure decorations are still OFF
     console.log("Exited capture mode.");
 
-    isProcessing = true;
     hasAttempted = true;
     ocrResult = null;
     translatedText = null;

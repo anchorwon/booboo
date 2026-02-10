@@ -12,6 +12,7 @@ pub struct AppConfig {
     pub youdao_app_secret: String,
     pub coze_api_key: String,     // Future proofing
     pub shortcut: String,
+    pub shortcut_pin: String,
 }
 
 impl Default for AppConfig {
@@ -23,6 +24,7 @@ impl Default for AppConfig {
             youdao_app_secret: "".to_string(),
             coze_api_key: "".to_string(),
             shortcut: "Alt+Shift+A".to_string(),
+            shortcut_pin: "Alt+Shift+S".to_string(),
         }
     }
 }

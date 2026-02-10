@@ -314,3 +314,17 @@ async fn run_windows_native_ocr_v2(png_bytes: Vec<u8>) -> Result<String, String>
         Ok(String::new())
     }
 }
+
+pub fn image_to_base64(image: &DynamicImage) -> String {
+    use std::io::Cursor;
+    use base64::{Engine as _, engine::general_purpose};
+    
+    let mut buffer = Cursor::new(Vec::new());
+    if let Err(e) = image.write_to(&mut buffer, image::ImageFormat::Png) {
+        println!("Error encoding image to base64: {}", e);
+        return "".to_string();
+    }
+    
+    let vec = buffer.into_inner();
+    general_purpose::STANDARD.encode(&vec)
+}

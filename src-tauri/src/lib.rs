@@ -14,6 +14,8 @@ struct AppState {
     is_pinned: Mutex<bool>,
     is_dashboard_open: Mutex<bool>,
     is_capturing: Mutex<bool>,
+    is_processing: Mutex<bool>,
+    pin_cache: Mutex<std::collections::HashMap<String, String>>,
 }
 
 #[tauri::command]
@@ -90,6 +92,13 @@ async fn ocr_capture_area(window: tauri::Window, config_state: State<'_, ConfigS
             Err("Command panicked during execution".to_string())
         }
     }
+}
+
+#[tauri::command]
+fn set_processing_state(state: State<AppState>, processing: bool) {
+    let mut is_proc = state.is_processing.lock().unwrap();
+    *is_proc = processing;
+    println!("DEBUG: Processing state set to: {}", processing);
 }
 
 #[tauri::command]
@@ -170,17 +179,122 @@ fn exit_capture_mode(window: tauri::Window, state: State<'_, AppState>) {
 }
 
 #[tauri::command]
-async fn resize_dashboard_window(window: tauri::Window, state: State<'_, AppState>, mode: String) -> Result<(), String> {
-    let mut is_dashboard_open = state.is_dashboard_open.lock().unwrap();
-    if mode == "dashboard" {
-        *is_dashboard_open = true;
-        let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize { width: 850.0, height: 650.0 }));
-    } else {
-        *is_dashboard_open = false;
-        let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize { width: 450.0, height: 550.0 }));
-    }
-    let _ = window.center();
+async fn create_pin_window(app: tauri::AppHandle, label: String, width: f64, height: f64) -> Result<(), String> {
+    use tauri::{WebviewWindowBuilder, WebviewUrl};
+    
+    println!("Creating pin window: {}, {}x{}", label, width, height);
+    let win = WebviewWindowBuilder::new(
+        &app,
+        &label,
+        WebviewUrl::App("pin".into())
+    )
+    .inner_size(width, height)
+    .decorations(false)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .transparent(true)
+    .shadow(false)
+    .build()
+    .map_err(|e| e.to_string())?;
+
     Ok(())
+}
+
+#[tauri::command]
+async fn pin_selection(app: tauri::AppHandle, window: tauri::Window, x: i32, y: i32, width: u32, height: u32) -> Result<(), String> {
+    let scale_factor = window.scale_factor().map_err(|e| e.to_string())?;
+    
+    // 1. Capture the area
+    // Reuse logic from ocr_capture_area but for pinning
+    // We need absolute physical coordinates
+    
+    let abs_x = (x as f64 * scale_factor).round() as i32;
+    let abs_y = (y as f64 * scale_factor).round() as i32;
+    let abs_w = (width as f64 * scale_factor).round() as u32;
+    let abs_h = (height as f64 * scale_factor).round() as u32;
+    
+    let img = ocr_core::capture_area(abs_x, abs_y, abs_w, abs_h).await.map_err(|e| e.to_string())?;
+    
+    // 2. Convert to base64
+    let base64_img = ocr_core::image_to_base64(&img);
+    if base64_img.is_empty() {
+        return Err("Failed to encode image".to_string());
+    }
+    
+    let img_src = format!("data:image/png;base64,{}", base64_img);
+    
+    // 3. Create window
+    let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis();
+    let label = format!("pin_{}", timestamp);
+    
+    // Use logical size for window creation
+    create_pin_window(app.clone(), label.clone(), width as f64, height as f64).await?;
+    
+    // 4. Store image data in cache
+    {
+        let state = app.state::<AppState>();
+        let mut cache = state.pin_cache.lock().unwrap();
+        cache.insert(label.clone(), img_src);
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_pin_image(state: State<'_, AppState>, label: String) -> Result<String, String> {
+    let mut cache = state.pin_cache.lock().unwrap();
+    if let Some(img) = cache.remove(&label) {
+        Ok(img)
+    } else {
+        Err("Image not found in cache".to_string())
+    }
+}
+
+
+#[tauri::command]
+async fn resize_dashboard_window(window: tauri::Window, state: State<'_, AppState>, mode: String) -> Result<(), String> {
+    let mut is_dashboard_open_lock = state.is_dashboard_open.lock().unwrap();
+
+    if mode == "dashboard" {
+        *is_dashboard_open_lock = true;
+        let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize { width: 850.0, height: 650.0 }));
+        let _ = window.center();
+        let _ = window.show();
+        let _ = window.set_focus();
+        Ok(())
+    } else {
+        // --- CLOSING DASHBOARD ---
+        *is_dashboard_open_lock = false;
+        
+        let is_processing = *state.is_processing.lock().unwrap();
+
+        if !is_processing {
+            // 1. Hide immediately if we are truly closing the dashboard to tray
+            let _ = window.hide();
+            
+            // 2. Perform resize/center in background to avoid any visual jitter
+            let window_clone = window.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(250));
+                let _ = window_clone.set_size(tauri::Size::Logical(tauri::LogicalSize { width: 450.0, height: 550.0 }));
+                let _ = window_clone.center();
+            });
+        } else {
+            // If we are processing, just resize and show (avoid the hide flicker)
+            let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize { width: 450.0, height: 550.0 }));
+            let _ = window.center();
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
+        
+        Ok(())
+    }
+}
+
+#[tauri::command]
+async fn close_window(window: tauri::Window) -> Result<(), String> {
+    println!("Closing window: {}", window.label());
+    window.close().map_err(|e| e.to_string())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -188,22 +302,32 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new()
-            .with_handler(|app, _shortcut, event| {
+            .with_handler(|app, shortcut, event| {
+                println!("DEBUG: Global shortcut event received: {:?}", shortcut);
                 if event.state() == ShortcutState::Pressed {
                     println!("DEBUG: Global shortcut pressed!");
                     if let Some(window) = app.get_webview_window("main") {
-                        println!("DEBUG: Emitting shortcut-capture event...");
-                        // We do NOT call window.show() here to prevent the window flash in screenshot.
-                        // The frontend will call show() AFTER capture_full_screen is done.
-                        let _ = window.emit("shortcut-capture", ());
-                        // REMOVED set_focus() to prevent flash of old UI
-                    } else {
-                        println!("DEBUG: Main window NOT found!");
+                        let config = app.state::<ConfigState>().config.lock().unwrap().clone();
+                        use std::str::FromStr;
+                        if let Ok(pin_shortcut) = Shortcut::from_str(&config.shortcut_pin) {
+                            if shortcut == &pin_shortcut {
+                                let _ = window.emit("shortcut-pin", ());
+                                return;
+                            }
+                        }
+                        
+                        if let Ok(ocr_shortcut) = Shortcut::from_str(&config.shortcut) {
+                            if shortcut == &ocr_shortcut {
+                                let _ = window.emit("shortcut-capture", ());
+                                return;
+                            }
+                        }
                     }
                 }
             })
             .build()
         )
+        // ... (rest of setup)
         .setup(|app| {
             // Initialize Config State
             let config_state = ConfigState::new(app.handle());
@@ -212,47 +336,72 @@ pub fn run() {
             // Register global shortcut
             let config = app.state::<ConfigState>().config.lock().unwrap().clone();
             let shortcut_str = if config.shortcut.is_empty() { "Alt+Shift+A".to_string() } else { config.shortcut.clone() };
-            
-            println!("Registering initial shortcut: {}", shortcut_str);
-            
-            // We need to parse the string to a Shortcut struct, but `tauri_plugin_global_shortcut` 
-            // register method primarily takes `Shortcut`.
-            // However, the high-level API usually allows string registration if we use the `GlobalShortcutExt` trait or manager.
-            // Wait, `app.global_shortcut().register(shortcut)` takes a `Shortcut` struct which we constructed manually before.
-            // Constructing `Shortcut` from string manually is hard. 
-            // Actually, `tauri_plugin_global_shortcut` typically exposes a string parser or we should use the string-based API if available.
-            // Let's check `tauri_plugin_global_shortcut::Shortcut::from_str`.
-            
+            let pin_str = if config.shortcut_pin.is_empty() { "Alt+Shift+S".to_string() } else { config.shortcut_pin.clone() };
+
             use std::str::FromStr;
             
-            match Shortcut::from_str(&shortcut_str) {
-                Ok(shortcut) => {
-                    if let Err(e) = app.global_shortcut().register(shortcut) {
-                        println!("Warning: Failed to register global shortcut: {}", e);
-                    } else {
-                        println!("Global shortcut registered successfully.");
-                    }
-                },
-                Err(e) => {
-                    println!("Error parsing shortcut '{}': {}", shortcut_str, e);
-                    // Fallback
-                    let fallback = Shortcut::new(Some(Modifiers::ALT | Modifiers::SHIFT), Code::KeyA);
-                    let _ = app.global_shortcut().register(fallback);
-                }
+            // Register OCR
+            if let Ok(s) = Shortcut::from_str(&shortcut_str) {
+                 if let Err(e) = app.global_shortcut().register(s) {
+                     println!("Failed to register OCR shortcut '{}': {}", shortcut_str, e);
+                 }
             }
-
+            
+            // Register Pin
+             if let Ok(s) = Shortcut::from_str(&pin_str) {
+                 if let Err(e) = app.global_shortcut().register(s) {
+                     println!("Failed to register Pin shortcut '{}': {}", pin_str, e);
+                 }
+            }
+            
             // Create tray menu
             let quit = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
             let settings = MenuItem::with_id(app, "settings", "设置", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&settings, &quit])?;
 
-            // Build tray icon from specific path for better reliability
-            // Force load the icon from bytes to ensure we get the updated one
-            // We use a new filename 'tray_rounded.ico' to bypass Windows cache
-            let icon_bytes = include_bytes!("../icons/tray_rounded.ico");
-            let tray_icon = tauri::image::Image::from_bytes(icon_bytes).unwrap_or_else(|_| {
-                app.default_window_icon().unwrap().clone()
-            });
+            // Build tray icon
+            // Build tray icon
+            let icon_bytes = include_bytes!("../../static/logo.png");
+            
+            // Process image to add rounded corners
+            let tray_icon = {
+                use image::{GenericImageView, ImageBuffer, Rgba};
+                let img = image::load_from_memory(icon_bytes).map_err(|e| e.to_string())?;
+                let (width, height) = img.dimensions();
+                let radius = width as f32 * 0.2; // 20% radius
+                let center_x = width as f32 / 2.0;
+                let center_y = height as f32 / 2.0;
+                
+                let mut buffer = ImageBuffer::new(width, height);
+                
+                for (x, y, pixel) in img.pixels() {
+                    let cx = if (x as f32) < radius { radius } else if (x as f32) > width as f32 - radius { width as f32 - radius } else { x as f32 };
+                    let cy = if (y as f32) < radius { radius } else if (y as f32) > height as f32 - radius { height as f32 - radius } else { y as f32 };
+                    
+                    let dx = x as f32 - cx;
+                    let dy = y as f32 - cy;
+                    let distance = (dx * dx + dy * dy).sqrt();
+                    
+                    if distance <= radius + 0.5 {
+                        buffer.put_pixel(x, y, pixel);
+                    } else {
+                        // Transparent
+                         buffer.put_pixel(x, y, Rgba([0, 0, 0, 0]));
+                    }
+                }
+                
+                // Encode back to PNG to get an owned Image via from_bytes (bypassing lifetime issues with Image::new generic)
+                use std::io::Cursor;
+                use image::ImageFormat;
+                
+                let mut cursor = Cursor::new(Vec::new());
+                buffer.write_to(&mut cursor, ImageFormat::Png).map_err(|e| e.to_string())?;
+                let png_bytes = cursor.into_inner();
+                
+                tauri::image::Image::from_bytes(&png_bytes).unwrap_or_else(|_| {
+                    app.default_window_icon().unwrap().clone()
+                })
+            };
 
             let _tray = TrayIconBuilder::new()
                 .icon(tray_icon)
@@ -264,7 +413,14 @@ pub fn run() {
                         }
                         "settings" => {
                             if let Some(window) = app.get_webview_window("main") {
-                                // Resize to dashboard size
+                                // Sync internal state
+                                {
+                                    let state = app.state::<AppState>();
+                                    let mut is_db = state.is_dashboard_open.lock().unwrap();
+                                    *is_db = true;
+                                }
+
+                                // Reset and show dash
                                 let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize { width: 850.0, height: 650.0 }));
                                 let _ = window.center();
                                 let _ = window.emit("open-settings", ());
@@ -281,6 +437,8 @@ pub fn run() {
                 is_pinned: Mutex::new(false),
                 is_dashboard_open: Mutex::new(false),
                 is_capturing: Mutex::new(false),
+                is_processing: Mutex::new(false),
+                pin_cache: Mutex::new(std::collections::HashMap::new()),
             });
 
             // Handle window events
@@ -299,10 +457,11 @@ pub fn run() {
                             let is_pinned = *state.is_pinned.lock().unwrap();
                             let is_dashboard_open = *state.is_dashboard_open.lock().unwrap();
                             let is_capturing = *state.is_capturing.lock().unwrap();
+                            let is_processing = *state.is_processing.lock().unwrap();
 
-                            println!("DEBUG: Window lost focus. Flags: pinned={}, dashboard={}, capturing={}", is_pinned, is_dashboard_open, is_capturing);
+                            println!("DEBUG: Window lost focus. Flags: pinned={}, dashboard={}, capturing={}, processing={}", is_pinned, is_dashboard_open, is_capturing, is_processing);
 
-                            if !is_pinned && !is_dashboard_open && !is_capturing {
+                            if !is_pinned && !is_dashboard_open && !is_capturing && !is_processing {
                                 println!("DEBUG: Hiding window...");
                                 let _ = window_clone.hide();
                             } else {
@@ -326,8 +485,13 @@ pub fn run() {
             verify_youdao_id_and_key,
             resize_dashboard_window,
             log_message,
+            set_processing_state, // Added
             enter_capture_mode,
             exit_capture_mode,
+            create_pin_window, // Added
+            pin_selection, // Added
+            get_pin_image, // Added
+            close_window  // New command
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -338,18 +502,35 @@ fn save_config(app: tauri::AppHandle, state: State<ConfigState>, new_config: App
     let mut config = state.config.lock().map_err(|e| e.to_string())?;
     
     // Check if shortcut changed
+    let mut shortcuts_changed = false;
+    
     if config.shortcut != new_config.shortcut {
-        println!("Shortcut changed from '{}' to '{}'. Updating...", config.shortcut, new_config.shortcut);
-        
-        // Unregister all (easiest way to clean up old one without parsing it again)
+        println!("Shortcut changed from '{}' to '{}'.", config.shortcut, new_config.shortcut);
+        shortcuts_changed = true;
+    }
+    
+    if config.shortcut_pin != new_config.shortcut_pin {
+        println!("Pin Shortcut changed from '{}' to '{}'.", config.shortcut_pin, new_config.shortcut_pin);
+        shortcuts_changed = true;
+    }
+    
+    if shortcuts_changed {
+        // Unregister all 
         let _ = app.global_shortcut().unregister_all();
         
-        // Register new
         use std::str::FromStr;
+        
+        // Re-register OCR
         if let Ok(shortcut) = Shortcut::from_str(&new_config.shortcut) {
              if let Err(e) = app.global_shortcut().register(shortcut) {
-                 println!("Failed to register new shortcut: {}", e);
-                 // Don't fail the save, just warn
+                 println!("Failed to register new OCR shortcut: {}", e);
+             }
+        }
+        
+        // Re-register Pin
+        if let Ok(shortcut) = Shortcut::from_str(&new_config.shortcut_pin) {
+             if let Err(e) = app.global_shortcut().register(shortcut) {
+                 println!("Failed to register new Pin shortcut: {}", e);
              }
         }
     }

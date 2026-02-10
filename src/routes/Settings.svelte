@@ -10,6 +10,7 @@
     youdao_app_secret: string;
     coze_api_key: string;
     shortcut: string;
+    shortcut_pin: string;
   }
 
   let isInitialLoad = true;
@@ -35,12 +36,12 @@
   let activeTab = $state("general"); // general | ocr | translate | shortcut | about
   let { onClose } = $props();
   
-  let isRecording = $state(false);
+  let recordingMode = $state<string | null>(null); // 'ocr' | 'pin' | null
 
   const tabs = [
     { id: "general", label: "通用", icon: "/settings.svg" },
     { id: "ocr", label: "OCR 设置", icon: "/ocr.svg" },
-    { id: "translate", label: "翻译服务", icon: "M12.87,15.07L10.33,12.56L10.36,12.53C12.1,10.59 13.34,8.36 14.07,6H17V4H10V2H8V4H1V6H12.17C11.5,7.92 10.44,9.75 9,11.35C8.07,10.32 7.3,9.19 6.69,8H4.69C5.42,9.63 6.42,11.17 7.67,12.56L2.58,17.58L4,19L9,14L12.11,17.11L12.87,15.07M18.5,10H16.5L12,22H14L15.12,19H19.87L21,22H23L18.5,10M15.88,17L17.5,12.65L19.12,17H15.88Z" },
+    { id: "translate", label: "翻译服务", icon: "/fanyi.svg" },
     { id: "shortcut", label: "快捷键", icon: "/keyboard.svg" },
     { id: "about", label: "关于", icon: "/alert-square.svg" },
   ];
@@ -53,6 +54,7 @@
       // We'll use isInitialLoad to prevent saving immediately after load.
       Object.assign(config, loadedConfig);
       if (!config.shortcut) config.shortcut = "Alt+Shift+A";
+      if (!config.shortcut_pin) config.shortcut_pin = "Alt+Shift+S";
       
       await tick();
       isInitialLoad = false;
@@ -71,7 +73,8 @@
       youdao_app_key: config.youdao_app_key,
       youdao_app_secret: config.youdao_app_secret,
       coze_api_key: config.coze_api_key,
-      shortcut: config.shortcut
+      shortcut: config.shortcut,
+      shortcut_pin: config.shortcut_pin
     };
 
     if (isInitialLoad) return;
@@ -110,8 +113,8 @@
 
   async function saveSettings() {
     try {
-      if (isRecording) {
-         isRecording = false; // Cancel recording if saving
+      if (recordingMode) {
+         recordingMode = null; // Cancel recording if saving
       }
       await invoke("save_config", { newConfig: config });
       message = "设置已保存";
@@ -125,7 +128,7 @@
   }
   
   function handleKeyDown(e: KeyboardEvent) {
-    if (!isRecording) return;
+    if (!recordingMode) return;
     e.preventDefault();
     e.stopPropagation();
     
@@ -147,13 +150,16 @@
     
     // Combine
     if (modifiers.length > 0) {
-        config.shortcut = [...modifiers, key].join("+");
-        isRecording = false;
+        const shortcutStr = [...modifiers, key].join("+");
+        if (recordingMode === 'ocr') config.shortcut = shortcutStr;
+        if (recordingMode === 'pin') config.shortcut_pin = shortcutStr;
+        recordingMode = null;
     } else {
         // Allow single keys like F1-F12?
         if (key.startsWith("F")) {
-            config.shortcut = key;
-            isRecording = false;
+            if (recordingMode === 'ocr') config.shortcut = key;
+            if (recordingMode === 'pin') config.shortcut_pin = key;
+            recordingMode = null;
         }
     }
   }
@@ -337,22 +343,28 @@
                 <!-- svelte-ignore a11y_no_static_element_interactions -->
                 <div 
                    class="key-binder" 
-                   class:recording={isRecording}
-                   onclick={() => isRecording = true}
+                   class:recording={recordingMode === 'ocr'}
+                   onclick={() => recordingMode = 'ocr'}
                 >
-                   {isRecording ? "按下快捷键..." : config.shortcut}
+                   {recordingMode === 'ocr' ? "按下快捷键..." : config.shortcut}
                 </div>
                 </div>
                 <div class="setting-divider"></div>
                 <div class="setting-item">
                 <div class="setting-info">
-                    <span class="label">屏幕翻译</span>
-                    <span class="desc">识别区域后自动翻译 (开发中)</span>
+                    <span class="label">屏幕贴图 (Pin)</span>
+                    <span class="desc">将截图固定的屏幕上</span>
                 </div>
-                <div class="key-binder empty">点击设置</div>
+                <div 
+                   class="key-binder" 
+                   class:recording={recordingMode === 'pin'}
+                   onclick={() => recordingMode = 'pin'}
+                >
+                   {recordingMode === 'pin' ? "按下快捷键..." : config.shortcut_pin}
+                </div>
                 </div>
             </div>
-            <p class="section-tip">点击上方快捷键区域即可重新录制。录制完成后请点击右上角“保存更改”。</p>
+            <!-- Tip removed as requested -->
           </section>
         {/if}
 
@@ -363,7 +375,7 @@
               <h3>BooBoo OCR</h3>
               <p>v0.1.0-alpha</p>
               <div class="links">
-                <a href="#">官方网站</a>
+                <a href="https://github.com/anchorwon/booboo" target="_blank" rel="noreferrer">GitHub 项目主页</a>
                 <span class="dot">·</span>
                 <a href="#">开源协议</a>
                 <span class="dot">·</span>
@@ -859,9 +871,9 @@
     padding: 40px 20px;
     text-align: center;
     background: #fff;
-    border-radius: 16px;
-    border: none; /* Removed border */
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02); /* Added shadow to match section-card */
+    border-radius: 12px;
+    border: 1px solid rgba(0, 0, 0, 0.03);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.02);
   }
 
   .about-logo {
