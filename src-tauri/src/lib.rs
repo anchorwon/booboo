@@ -9,6 +9,12 @@ use std::sync::Mutex;
 use tauri::{Manager, State, Emitter};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::TrayIconBuilder;
+#[cfg(target_os = "windows")]
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetWindowLongPtrW, SetWindowLongPtrW, GWL_EXSTYLE, WS_EX_TOOLWINDOW,
+};
+#[cfg(target_os = "windows")]
+use windows::Win32::Foundation::HWND;
 
 struct AppState {
     is_pinned: Mutex<bool>,
@@ -142,7 +148,7 @@ fn enter_capture_mode(window: tauri::Window, state: State<'_, AppState>) {
     
     let t1 = start.elapsed();
     
-    // 2. Manual Fullscreen: Match monitor size
+    // 2. Exact Monitor Size: Back to full screen for a better UX (no gaps).
     if let Ok(Some(monitor)) = window.current_monitor() {
         let size = monitor.size();
         let position = monitor.position();
@@ -153,7 +159,19 @@ fn enter_capture_mode(window: tauri::Window, state: State<'_, AppState>) {
     
     let t2 = start.elapsed();
     
-    // 3. Show and Focus
+    // 3. Show and Focus with Win32 tweaks
+    // Set WS_EX_TOOLWINDOW to prevent showing in taskbar and potentially bypass some DND logic.
+    #[cfg(target_os = "windows")]
+    if let Ok(hwnd) = window.hwnd() {
+        let hwnd = HWND(hwnd.0 as isize);
+        unsafe {
+            let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            let _ = SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style | WS_EX_TOOLWINDOW.0 as isize);
+        }
+    }
+
+    let _ = window.set_shadow(false);
+    let _ = window.set_always_on_top(true);
     let _ = window.show();
     let _ = window.set_focus();
     
@@ -170,7 +188,17 @@ fn exit_capture_mode(window: tauri::Window, state: State<'_, AppState>) {
     let mut is_capturing = state.is_capturing.lock().unwrap();
     *is_capturing = false;
     
-    // let _ = window.set_always_on_top(false);
+    let _ = window.set_always_on_top(false);
+    
+    #[cfg(target_os = "windows")]
+    if let Ok(hwnd) = window.hwnd() {
+        let hwnd = HWND(hwnd.0 as isize);
+        unsafe {
+            let ex_style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            let _ = SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style & !WS_EX_TOOLWINDOW.0 as isize);
+        }
+    }
+
     let _ = window.set_resizable(true);
     let _ = window.set_fullscreen(false); // Just in case
     let _ = window.set_decorations(false); 
@@ -303,9 +331,17 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new()
             .with_handler(|app, shortcut, event| {
-                println!("DEBUG: Global shortcut event received: {:?}", shortcut);
                 if event.state() == ShortcutState::Pressed {
-                    println!("DEBUG: Global shortcut pressed!");
+                    let state = app.state::<AppState>();
+                    let is_capturing = *state.is_capturing.lock().unwrap();
+                    let is_processing = *state.is_processing.lock().unwrap();
+                    
+                    if is_capturing || is_processing {
+                        println!("DEBUG: Ignoring shortcut - already capturing or processing. (capturing={}, processing={})", is_capturing, is_processing);
+                        return;
+                    }
+
+                    println!("DEBUG: Global shortcut pressed: {:?}", shortcut);
                     if let Some(window) = app.get_webview_window("main") {
                         let config = app.state::<ConfigState>().config.lock().unwrap().clone();
                         use std::str::FromStr;
@@ -453,20 +489,34 @@ pub fn run() {
                             let _ = window_clone.hide();
                         }
                         tauri::WindowEvent::Focused(false) => {
-                            let state = app_handle.state::<AppState>();
-                            let is_pinned = *state.is_pinned.lock().unwrap();
-                            let is_dashboard_open = *state.is_dashboard_open.lock().unwrap();
-                            let is_capturing = *state.is_capturing.lock().unwrap();
-                            let is_processing = *state.is_processing.lock().unwrap();
+                            let app_handle_inner = app_handle.clone();
+                            let window_inner = window_clone.clone();
+                            
+                            // 200ms Grace period for Focus Loss.
+                            // This prevents accidental hiding during window move (drag region) 
+                            // or when clicking transparent window edges.
+                            std::thread::spawn(move || {
+                                std::thread::sleep(std::time::Duration::from_millis(200));
+                                
+                                // Check if focus was regained
+                                if let Ok(focused) = window_inner.is_focused() {
+                                    if focused {
+                                        println!("DEBUG: Focus regained or drag in progress, staying visible.");
+                                        return;
+                                    }
+                                }
 
-                            println!("DEBUG: Window lost focus. Flags: pinned={}, dashboard={}, capturing={}, processing={}", is_pinned, is_dashboard_open, is_capturing, is_processing);
+                                let state = app_handle_inner.state::<AppState>();
+                                let is_pinned = *state.is_pinned.lock().unwrap();
+                                let is_dashboard_open = *state.is_dashboard_open.lock().unwrap();
+                                let is_capturing = *state.is_capturing.lock().unwrap();
+                                let is_processing = *state.is_processing.lock().unwrap();
 
-                            if !is_pinned && !is_dashboard_open && !is_capturing && !is_processing {
-                                println!("DEBUG: Hiding window...");
-                                let _ = window_clone.hide();
-                            } else {
-                                println!("DEBUG: Keeping window visible.");
-                            }
+                                if !is_pinned && !is_dashboard_open && !is_capturing && !is_processing {
+                                    println!("DEBUG: Window lost focus (after grace). Hiding...");
+                                    let _ = window_inner.hide();
+                                }
+                            });
                         }
                         _ => {}
                     }

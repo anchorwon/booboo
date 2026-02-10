@@ -77,11 +77,8 @@
     setTimeout(enforceFrameless, 50);
 
     return () => {
-    return () => {
       unlistenPromise.then(unlisten => unlisten());
       unlistenPinPromise.then(unlisten => unlisten());
-      settingsUnlistenPromise.then(unlisten => unlisten());
-    };
       settingsUnlistenPromise.then(unlisten => unlisten());
     };
   });
@@ -108,11 +105,25 @@
   }
 
   let captureBg = $state<string | null>(null);
+  let resolveImageLoaded: (() => void) | null = null;
+
+  async function handleImageLoaded() {
+    console.log("Frontend: Background image actually rendered and loaded.");
+    if (resolveImageLoaded) {
+      resolveImageLoaded();
+      resolveImageLoaded = null;
+    }
+  }
 
   async function startCapture(mode: 'ocr' | 'pin' = 'ocr') {
-    console.log("startCapture called with mode:", mode);
+    console.log("startCapture called. mode:", mode, "isCapturing:", isCapturing, "isProcessing:", isProcessing);
+    
+    if (isCapturing) {
+        console.warn("Already capturing, ignoring request.");
+        return;
+    }
+
     captureMode = mode;
-    console.log("startCapture called. isProcessing:", isProcessing, "showSettings:", showSettings);
     if (isProcessing) {
         console.log("Skipping capture because isProcessing is true");
         return;
@@ -128,30 +139,22 @@
     }
 
     try {
-      // Step 0: Ensure window is hidden before capture to prevent flash
-      // Since backend no longer calls show(), this is usually already hidden 
-      // unless the user had the result window open.
-      // Step 0: Ensure window is hidden before capture to prevent flash
-      // Since backend no longer calls show(), this is usually already hidden 
-      // unless the user had the result window open.
-      await appWindow.hide();
-      // Wait a bit for the window to actually disappear from the screen compositor
-      // Reduced from 300ms to 50ms for better responsiveness
-      await new Promise(resolve => setTimeout(resolve, 50));
-      
+      // Step 0: Fast check for window state
+      // If window is visible, we hide it immediately WITHOUT a long delay.
+      // Most of the time it's hidden in tray anyway.
+      appWindow.hide(); 
       
       isCapturing = true; 
-      captureBg = null; // Reset background to prevent showing old or broken image
+      captureBg = null; 
       document.body.style.backgroundColor = "transparent";
       ocrResult = null;
       translatedText = null;
       
       console.time("CaptureTotal");
-      console.log("Starting capture process...");
-      invoke("log_message", { msg: "FRONTEND: Starting capture process..." });
+      console.log("Starting capture process (Optimized Path)...");
       
-      await updateConfig(); 
-      
+      // Step 1: Execute capture.
+      // We don't call updateConfig() here anymore as it's cached in currentTranslateEngine.
       statusMessage = "正在截取屏幕...";
       
       console.time("CaptureScreenshot");
@@ -159,25 +162,19 @@
       console.timeEnd("CaptureScreenshot");
       
       console.log("Capture file path:", filePath);
-      invoke("log_message", { msg: `FRONTEND: Capture file path: ${filePath}` });
       
+      // Step 2: Set source and wait for one tick to ensure DOM node is created
       captureBg = convertFileSrc(filePath);
-      
-      // Step 3: Wait for Svelte to render the image to the DOM
       await tick();
-      // Small pause to allow browser paint cycle
-      await new Promise(r => setTimeout(r, 50)); 
       
-      invoke("log_message", { msg: "FRONTEND: Entering capture mode via Backend..." });
-      
-      // Delegate window sizing/showing to backend for robustness
+      // Step 3: Show window IMMEDIATELY. 
+      // We don't wait for the image load event (onload) to minimize perceived latency.
+      // The browser will render the image as soon as it decodes the local file.
       console.time("EnterCaptureMode");
       await invoke("enter_capture_mode");
       console.timeEnd("EnterCaptureMode");
       
-      invoke("log_message", { msg: "FRONTEND: Window should be visible now." });
       console.timeEnd("CaptureTotal");
-      
       statusMessage = "请选择区域";
     } catch (e) {
       console.error("Failed to start capture:", e);
@@ -213,12 +210,15 @@
     isProcessing = true;
     invoke("set_processing_state", { processing: true });
     
+    // 1. Hide window immediately to prevent seeing stretched dashboard
+    await appWindow.hide();
+    
     isCapturing = false;
     document.body.style.backgroundColor = "";
     
-    // Exit manual fullscreen via backend
+    // 2. Exit manual fullscreen via backend
     await invoke("exit_capture_mode");
-    // Force center and correct size after capture
+    // 3. Force center and correct size after capture (this will show the window again if needed)
     await invoke("resize_dashboard_window", { mode: "normal" });
     
     // Safety check: ensure decorations are still OFF
@@ -273,14 +273,14 @@
   }
 
   async function handleCancel() {
+    // 1. Hide the window immediately on cancel to prevent dashboard flash
+    console.log("Cancelled capture, hiding window first...");
+    await appWindow.hide();
+
     isCapturing = false;
     document.body.style.backgroundColor = "";
     
     await invoke("exit_capture_mode");
-    
-    // Crucial: Hide the window immediately on cancel, otherwise it stays visible (borderless/fullscreen turned off but still visible)
-    console.log("Cancelled capture, hiding window...");
-    await appWindow.hide();
     
     console.log("Cancelled capture.");
     
@@ -328,7 +328,7 @@
 </script>
 
 {#if isCapturing}
-  <CaptureOverlay backgroundImage={captureBg} onSelect={handleAreaSelect} onCancel={handleCancel} />
+  <CaptureOverlay backgroundImage={captureBg} onSelect={handleAreaSelect} onCancel={handleCancel} onLoad={handleImageLoaded} />
 {/if}
 
 {#if showSettings}
@@ -338,7 +338,7 @@
 <div style:display={isCapturing || showSettings ? 'none' : 'block'}>
 <main class="bob-container">
   <!-- Top Toolbar -->
-  <header class="toolbar">
+  <header class="toolbar" data-tauri-drag-region>
     <div class="left-actions">
       <button class="tool-btn pin-btn" class:active={isPinned} onclick={togglePin} title={isPinned ? "取消固定" : "固定"}>
         <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M16,12V4H17V2H7V4H8V12L6,14V16H11.2V22L12,22.8L12.8,22V16H18V14L16,12Z"/></svg>
@@ -411,10 +411,6 @@
         </div>
       </section>
 
-      <!-- FAB for Capture -->
-      <button class="fab-btn" onclick={startCapture} title="开始识别">
-        <svg viewBox="0 0 24 24" width="24" height="24"><path fill="currentColor" d="M3,3H9V5H5V9H3V3M21,3V9H19V5H15V3H21M3,21V15H5V19H9V21H3M21,21H15V19H19V15H21V21M12,12L15,10L18,12L15,14L12,12Z"/></svg>
-      </button>
     </div>
   </div>
 </main>
@@ -443,17 +439,42 @@
     }
   }
 
-  :global(body) {
+  :global(html), :global(body) {
     margin: 0;
     padding: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    background: transparent;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Microsoft YaHei", sans-serif;
+    background: transparent !important;
     overflow: hidden;
     user-select: none;
     -webkit-user-select: none;
     cursor: default;
     /* Round corners for borderless */
     border-radius: var(--bob-radius);
+  }
+
+  /* Simple & subtle scrollbar */
+  :global(::-webkit-scrollbar) {
+    width: 4px;
+    height: 4px;
+  }
+  :global(::-webkit-scrollbar-track) {
+    background: transparent;
+  }
+  :global(::-webkit-scrollbar-thumb) {
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: 10px;
+  }
+  :global(::-webkit-scrollbar-thumb:hover) {
+    background: rgba(0, 0, 0, 0.25);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :global(::-webkit-scrollbar-thumb) {
+      background: rgba(255, 255, 255, 0.2);
+    }
+    :global(::-webkit-scrollbar-thumb:hover) {
+      background: rgba(255, 255, 255, 0.3);
+    }
   }
 
   .bob-container {
@@ -510,7 +531,7 @@
   }
 
   .close-btn:hover {
-    color: #ef4444;
+    color: var(--bob-text-main);
   }
 
   .content {
@@ -592,7 +613,7 @@
   }
 
   .result-body {
-    padding: 12px;
+    padding: 12px 2px 12px 12px;
     position: relative;
   }
 
@@ -602,23 +623,30 @@
     line-height: 1.6;
     word-break: break-all;
     white-space: pre-wrap;
+    /* Custom scrollbar for inner areas if needed */
+    padding-right: 10px;
   }
 
   textarea.ocr-text {
     width: 100%;
-    min-height: 100px;
+    min-height: 60px;
+    max-height: 180px;
     background: transparent;
     border: none;
-    resize: vertical;
+    resize: none;
+    field-sizing: content;
     font-family: inherit;
     color: inherit;
     padding: 0;
     outline: none;
     display: block;
+    overflow-y: auto;
   }
 
   .translated-text {
-    min-height: 48px;
+    min-height: 40px;
+    max-height: 220px;
+    overflow-y: auto;
   }
 
   .divider {
@@ -697,33 +725,6 @@
     100% { background-position: -200% 0; }
   }
 
-  .fab-btn {
-    position: absolute;
-    right: 20px;
-    bottom: 20px;
-    width: 48px;
-    height: 48px;
-    border-radius: 24px;
-    background: var(--bob-accent);
-    color: white;
-    border: none;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: 0 4px 12px rgba(10, 132, 255, 0.3);
-    cursor: pointer;
-    transition: transform 0.2s, background 0.2s;
-    z-index: 10;
-  }
-
-  .fab-btn:hover {
-    transform: scale(1.1);
-    background: #0070e0;
-  }
-
-  .fab-btn:active {
-    transform: scale(0.95);
-  }
 
   .provider-badge {
     font-size: 10px;

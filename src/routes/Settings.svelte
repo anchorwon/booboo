@@ -414,7 +414,7 @@
     border-radius: 0;
     overflow: hidden;
     display: flex;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Microsoft YaHei", sans-serif;
   }
 
   /* Sidebar: Milky Glass effect for maximum occlusion and premium feel */

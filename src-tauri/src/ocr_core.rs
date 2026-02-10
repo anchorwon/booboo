@@ -31,18 +31,17 @@ pub async fn capture_full_screen() -> Result<String, String> {
     }
     println!("ocr_core: caching took {:?}", cache_start.elapsed());
 
-    // Convert to JPEG file for zero-latency transfer
+    // Convert to BMP file for zero-latency transfer
     let start_encode = std::time::Instant::now();
     let temp_dir = std::env::temp_dir();
-    let file_path = temp_dir.join("booboo_capture.jpg");
+    let file_path = temp_dir.join("booboo_capture.bmp");
     
-    // Use a moderate quality JPEG for the UI background (75 is usually indistinguishable for this use)
-    // We save the RGB version to avoid alpha channel overhead
-    let rgb_img = dynamic_image.to_rgb8();
-    rgb_img.save_with_format(&file_path, image::ImageFormat::Jpeg)
+    // BMP encoding is nearly zero-cost (no compression). 
+    // Disk write for ~15-30MB on SSD is much faster than JPEG software encoding.
+    dynamic_image.save_with_format(&file_path, image::ImageFormat::Bmp)
         .map_err(|e| e.to_string())?;
 
-    println!("ocr_core: File save took {:?}", start_encode.elapsed());
+    println!("ocr_core: BMP save took {:?}", start_encode.elapsed());
     println!("ocr_core: Total capture_full_screen backend took {:?}", start_time.elapsed());
     
     Ok(file_path.to_string_lossy().to_string())

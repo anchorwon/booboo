@@ -1,7 +1,7 @@
 <script>
   import { onMount } from 'svelte';
 
-  let { backgroundImage = "", onSelect, onCancel } = $props();
+  let { backgroundImage = "", onSelect, onCancel, onLoad } = $props();
 
   let startX = 0;
   let startY = 0;
@@ -74,11 +74,12 @@
     <img 
       src={backgroundImage} 
       class="bg-img" 
-      onerror={(e) => e.currentTarget.style.display = 'none'}
+      draggable="false"
+      style="pointer-events: none;"
+      onload={() => { console.log("CaptureOverlay: Background image loaded"); onLoad?.(); }}
+      onerror={(e) => { console.error("CaptureOverlay: Image load error"); e.currentTarget.style.display = 'none'; onLoad?.(); }}
     />
   {/if}
-  
-  <div class="dimmer"></div>
 
   <div 
     class="selection" 
@@ -87,15 +88,6 @@
     style:width="{rect.width}px" 
     style:height="{rect.height}px"
   >
-    {#if backgroundImage}
-       <div 
-         class="selection-bg"
-         style:background-image="url({backgroundImage})"
-         style:background-position="-{rect.x}px -{rect.y}px"
-         style:background-size="100vw 100vh"
-       ></div>
-    {/if}
-    
     {#if rect.width > 0}
       <div class="info">
         {rect.width} x {rect.height}
@@ -107,14 +99,6 @@
     <div class="corner bl"></div>
     <div class="corner br"></div>
   </div>
-  
-  <!-- Hint container removed as per user feedback -->
-  <!-- <div class="hint-container">
-    <div class="hint">
-      <span>拖拽选择区域，ESC 或 右键 取消</span>
-      <button class="exit-btn" onclick={(e) => { e.stopPropagation(); onCancel?.(); }}>退出</button>
-    </div>
-  </div> -->
 </div>
 
 <style>
@@ -139,27 +123,12 @@
     object-fit: contain;
   }
 
-  .dimmer {
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0);
-  }
-
   .selection {
     position: absolute;
-    border: 1px solid #3b82f6;
-    box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.1);
+    border: 2px solid #3b82f6; /* Slightly thicker border for better visibility without mask */
     pointer-events: none;
     overflow: hidden;
-  }
-
-  .selection-bg {
-    width: 100%;
-    height: 100%;
-    background-repeat: no-repeat;
+    /* Removed box-shadow mask */
   }
 
   .corner {
